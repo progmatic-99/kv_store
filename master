@@ -1,0 +1,3 @@
+#!/bin/bash
+
+uwsgi --http :${PORT:~5000} --wsgi-file src/server.py --callable master --master --processes 2
