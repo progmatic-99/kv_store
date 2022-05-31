@@ -1,5 +1,5 @@
 #!/bin/bash
 
 export TYPE=volume
-export DB=${1:~/tmp/cachedb/}
-uwsgi --http :${PORT:~5001} --wsgi-file src/server.py --callable volume --master --processes 2
+export DB=${1:-/tmp/cachedb/}
+uwsgi --http :${PORT:-5001} --wsgi-file src/server.py --callable volume --master --processes 2

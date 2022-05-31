@@ -1,4 +1,8 @@
 #!/bin/bash
 
+export DB=${1:-/home/progmatic99/tmp/cachedb/}
 export TYPE=master
-uwsgi --http :${PORT:~5000} --wsgi-file src/server.py --callable master --master --processes 2
+
+chmod 777 $DB
+
+uwsgi --http :${PORT:-5000} --wsgi-file src/server.py --callable master --master --processes 2
