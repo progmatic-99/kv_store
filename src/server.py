@@ -15,6 +15,10 @@ def master(env, start_response):
 
     metakey = db.get(key)
     if metakey is None:
+        if env["REQUEST_METHOD"] in ["PUT"]:
+            # handle put requests
+            pass
+
         # key doesn't exist
         start_response("404 Not found", [("Content-Type", "text/html")])
         return [b"key not found"]
@@ -22,17 +26,31 @@ def master(env, start_response):
     # key found: 'volume'
     meta = json.loads(metakey)
 
-    # send the redirect
+    # send the redirect for either GET or DELETE
     headers = [("location", "http://%s%s" % (meta["volume"], key)), ("expires", "0")]
     start_response("302 Found", headers)
     return [b""]
 
 
+# ** Volume server **
+
+
+class FileCache(object):
+    def __init__(self, basedir):
+        pass
+
+    def exists(self, key):
+        pass
+
+
 if os.environ["TYPE"] == "volume":
     host = socket.gethostname()
 
+    master = os.environ["MASTER"]
+
+    fc = FileCache(os.environ["VOLUME"])
+
 
 def volume(env, start_response):
-    print(env)
     start_response("200 OK", [("Content-Type", "text/html")])
     return [b"Volume World"]
