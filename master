@@ -1,6 +1,7 @@
 #!/bin/bash
 
-export DB=${1:-/home/progmatic99/tmp/cachedb/}
+export DB=${2:-/home/progmatic99/tmp/cachedb/}
+export VOLUMES=${1:-localhost:5001}
 export TYPE=master
 
 chmod 777 $DB
