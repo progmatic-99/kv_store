@@ -2,5 +2,6 @@
 
 export TYPE=volume
 export VOLUME=${1:-/home/progmatic99/tmp/volume/}
+export MASTER=${2:-localhost:5000}
 
 uwsgi --http :${PORT:-5001} --wsgi-file src/server.py --callable volume --master --processes 2
