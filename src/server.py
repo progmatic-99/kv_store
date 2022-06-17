@@ -1,10 +1,16 @@
 import os
 import json
-import sys
 import time
 import hashlib
 import socket
 import random
+import tempfile
+import xattr
+
+
+def resp(start_response, code, headers=[("Content-type", "text/plain")], body=b""):
+    start_response(code, headers)
+    return [body]
 
 
 # *** Master Server ***
@@ -21,48 +27,53 @@ if os.environ["TYPE"] == "master":
     db = plyvel.DB(os.environ["DB"], create_if_missing=True)
 
 
-def master(env, start_response):
-    key = env["REQUEST_URI"]
-    metakey = db.get(key.encode("utf-8"))
+def master(env, sr):
+    key = env["PATH_INFO"]
+    host = env["SERVER_NAME"] + ":" + env["SERVER_PORT"]
 
+    if env["REQUEST_METHOD"] == "POST":
+        # POST called by volume servers to write to database
+        flen = int(env.get("CONTENT_LENGTH", "0"))
+
+        if flen > 0:
+            db.put(key.encode("utf-8"), env["wsgi.input"].read(), sync=True)
+        else:
+            db.delete(key.encode("utf-8"))
+
+        return resp(sr, "200 OK")
+
+    metakey = db.get(key.encode("utf-8"))
     if metakey is None:
         if env["REQUEST_METHOD"] == "PUT":
             # handle put requests
             volume = random.choice(volumes)
-
-            meta = {"volume": volume}
-            db.put(key.encode("utf-8"), json.dumps(meta).encode("utf-8"))
         else:
             # key doesn't exist
-            start_response("404 Not found", [("Content-Type", "text/plain")])
-            return [b"key not found"]
+            return resp(sr, "404 Not Found")
     else:
         # key found
-        """
         if env["REQUEST_METHOD"] == "PUT":
-            start_response("409 Conflict", [("Content-Type", "text/plain")])
-            return [b"key already exists"]
+            return resp(sr, "409 Conflict")
 
-        """
         meta = json.loads(metakey.decode("utf-8"))
+        volume = meta["volume"]
 
-    volume = meta["volume"]
     # send the redirect for either GET or DELETE
     headers = [("Location", "http://%s%s" % (volume, key))]
-    start_response("307 Temporary Redirect", headers)
-    return [b""]
+
+    return resp(sr, "307 Temporary Redirect", headers)
 
 
 class FileCache(object):
     def __init__(self, basedir):
         self.basedir = os.path.realpath(basedir)
-        os.makedirs(self.basedir, exist_ok=True)
+        self.tmpdir = os.path.join(self.basedir, "tmp")
+        os.makedirs(self.tmpdir, exist_ok=True)
 
         print(f"Filecache in {self.basedir}")
 
     def key_to_path(self, key, mkdir_ok=False):
-        # must be md5 hash
-        assert len(key) == 32
+        key = hashlib.md5(key).hexdigest()
 
         # 2 layers deep in nginx world
         path = self.basedir + "/" + key[0:2] + "/" + key[0:4]
@@ -77,9 +88,13 @@ class FileCache(object):
     def get(self, key):
         return open(self.key_to_path(key), "rb")
 
-    def put(self, key, value):
-        with open(self.key_to_path(key, True), "wb") as f:
-            f.write(value)
+    def put(self, key, stream):
+        with tempfile.NamedTemporaryFile(dir=self.tmpdir, delete=False) as f:
+            # anti pattern: what if the file is 1gb
+            # read in chunks
+            f.write(stream.read())
+            xattr.setxattr(f.name, "user.key", key)
+            os.rename(f.name, self.key_to_path(key, True))
 
     def delete(self, key):
         os.unlink(self.key_to_path(key))
@@ -93,29 +108,33 @@ if os.environ["TYPE"] == "volume":
 # ** Volume server **
 
 
-def volume(env, start_response):
-    key = env["REQUEST_URI"].encode("utf-8")
-    hkey = hashlib.md5(key).hexdigest()
-
-    if env["REQUEST_METHOD"] == "GET":
-        if not fc.exists(hkey):
-            # key not in file cache
-            start_response("404 Not found", [("Content-Type", "text/plain")])
-            return [b"key not found"]
-
-        start_response("302 Found", [("Content-Type", "text/plain")])
-        return fc.get(hkey)
+def volume(env, sr):
+    key = env["PATH_INFO"]
+    host = env["SERVER_NAME"] + ":" + env["SERVER_PORT"]
 
     if env["REQUEST_METHOD"] == "PUT":
+        if fc.exists(key):
+            req = requests.post('http://'+env['QUERY_STRING'])
+            return resp(sr, "409 Conflict")
+
         flen = int(env.get("CONTENT_LENGTH", "0"))
 
         if flen > 0:
-            fc.put(hkey, env["wsgi.input"].read(flen))
-            start_response("200 OK", [("Content-Type", "text/plain")])
-            return [b""]
+            fc.put(key, env["wsgi.input"])
+            req = requests.post('http://'+env['QUERY_STRING'])
+
+            # notify database
+            return resp(sr, "201 Created")
         else:
-            start_response("411 Length Required", [("Content-Type", "text/plain")])
-            return [b""]
+            return resp(sr, "411 Length Required")
+
+    if not fc.exists(key):
+        # key not in file cache
+        return resp(sr, "404 Not Found", body=b"key not found")
+
+    if env["REQUEST_METHOD"] == "GET":
+        return resp(sr, "302 Found", body=fc.get(key).read())
 
     if env["REQUEST_METHOD"] == "DELETE":
-        fc.delete(hkey)
+        fc.delete(key)
+        return resp(sr, "200 OK")
