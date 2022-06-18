@@ -22,9 +22,6 @@ if os.environ["TYPE"] == "master":
     # check on volume servers
     volumes = os.environ["VOLUMES"].split(",")
 
-    for v in volumes:
-        print(v)
-
     import plyvel
 
     db = plyvel.DB(os.environ["DB"], create_if_missing=True)
@@ -84,7 +81,6 @@ class FileCache(object):
     def k2p(self, key, mkdir_ok=False):
         key = hashlib.md5(key.encode("utf-8")).hexdigest()
 
-        # 2 layers deep in nginx world
         path = self.basedir + "/" + key[0:2] + "/" + key[0:4]
         if not os.path.isdir(path) and mkdir_ok:
             # exist ok is fine, could be a race
